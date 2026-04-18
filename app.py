@@ -6,359 +6,479 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 
-# ── Page config ──────────────────────────────────────────────────────────────
+# ── Configuració de pàgina ────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="MACD Backtester",
+    page_title="Backtester MACD",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",   # col·lapsat per defecte en mòbil
 )
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
+# ── CSS optimitzat per mòbil ──────────────────────────────────────────────────
 st.markdown("""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;600&display=swap');
 
-  html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
-
-  .main { background-color: #0d1117; color: #e6edf3; }
-  .stApp { background-color: #0d1117; }
-
+  html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .stApp { background-color: #0d1117; color: #e6edf3; }
   h1, h2, h3 { font-family: 'Space Mono', monospace; }
 
+  /* ── Targetes mètriques ── */
   .metric-card {
     background: #161b22;
     border: 1px solid #30363d;
-    border-radius: 10px;
-    padding: 1.2rem 1.5rem;
+    border-radius: 12px;
+    padding: 0.9rem 0.75rem;
     text-align: center;
+    margin-bottom: 0.5rem;
   }
   .metric-label {
-    font-size: 0.75rem;
+    font-size: 0.65rem;
     color: #8b949e;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.07em;
     text-transform: uppercase;
-    margin-bottom: 0.3rem;
+    margin-bottom: 0.25rem;
+    line-height: 1.3;
+  }
+  .metric-sub {
+    font-size: 0.62rem;
+    color: #484f58;
+    margin-top: 0.2rem;
   }
   .metric-value {
     font-family: 'Space Mono', monospace;
-    font-size: 1.6rem;
+    font-size: 1.25rem;
     font-weight: 700;
+    line-height: 1.2;
   }
-  .positive { color: #3fb950; }
-  .negative { color: #f85149; }
+
+  /* ── Colors ── */
+  .positiu  { color: #3fb950; }
+  .negatiu  { color: #f85149; }
   .neutral  { color: #58a6ff; }
+  .avís     { color: #f0883e; }
 
-  .trade-table th {
-    background: #161b22 !important;
-    color: #8b949e !important;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
+  /* ── Sidebar ── */
   section[data-testid="stSidebar"] {
     background: #161b22;
     border-right: 1px solid #30363d;
   }
   section[data-testid="stSidebar"] * { color: #e6edf3 !important; }
 
-  .stSlider > div { color: #e6edf3; }
-  .header-tag {
+  /* ── Títols de secció ── */
+  .titol-seccio {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.68rem;
+    color: #8b949e;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-bottom: 1px solid #21262d;
+    padding-bottom: 0.35rem;
+    margin: 1.4rem 0 0.75rem 0;
+  }
+
+  /* ── Etiqueta capçalera ── */
+  .etiqueta-cap {
     display: inline-block;
     background: #1f3a5f;
     color: #58a6ff;
     font-family: 'Space Mono', monospace;
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     padding: 2px 10px;
     border-radius: 20px;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
     letter-spacing: 0.1em;
   }
+
+  /* ── Mòbil: columnes més estretes ── */
+  @media (max-width: 640px) {
+    .metric-value { font-size: 1.05rem; }
+    .metric-label { font-size: 0.6rem; }
+    h1 { font-size: 1.3rem !important; }
+    .block-container { padding: 0.75rem 0.75rem 2rem !important; }
+  }
+
+  /* ── Taula de trades ── */
+  .dataframe thead th {
+    background: #161b22 !important;
+    color: #8b949e !important;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .dataframe tbody td { font-size: 0.8rem; white-space: nowrap; }
 </style>
 """, unsafe_allow_html=True)
 
 
-# ── MACD logic ────────────────────────────────────────────────────────────────
-def compute_macd(close: pd.Series, fast=12, slow=26, signal=9):
-    ema_fast   = close.ewm(span=fast,   adjust=False).mean()
-    ema_slow   = close.ewm(span=slow,   adjust=False).mean()
-    macd_line  = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram  = macd_line - signal_line
-    return macd_line, signal_line, histogram
+# ── MACD ──────────────────────────────────────────────────────────────────────
+def calcular_macd(close, rapid=12, lent=26, senyal=9):
+    ema_rap  = close.ewm(span=rapid, adjust=False).mean()
+    ema_len  = close.ewm(span=lent,  adjust=False).mean()
+    linia    = ema_rap - ema_len
+    senyal_l = linia.ewm(span=senyal, adjust=False).mean()
+    histog   = linia - senyal_l
+    return linia, senyal_l, histog
 
 
-def run_backtest(df: pd.DataFrame, capital: float):
-    """Simple MACD crossover: buy on bullish cross, sell on bearish cross."""
-    macd, signal, hist = compute_macd(df["Close"])
+# ── Backtest ──────────────────────────────────────────────────────────────────
+def executar_backtest(df, capital, import_op, rapid, lent, senyal):
+    macd, sig, hist = calcular_macd(df["Close"], rapid, lent, senyal)
     df = df.copy()
-    df["macd"]     = macd
-    df["signal"]   = signal
-    df["hist"]     = hist
+    df["macd"]   = macd
+    df["senyal"] = sig
+    df["hist"]   = hist
 
-    position  = 0          # shares held
-    cash      = capital
-    equity    = []
-    trades    = []
-    entry_price = 0.0
-    entry_date  = None
+    posicio     = 0
+    efectiu     = capital
+    equitat     = []
+    operacions  = []
+    preu_entrada = 0.0
+    data_entrada = None
 
     for i in range(1, len(df)):
-        prev_diff = df["macd"].iloc[i-1] - df["signal"].iloc[i-1]
-        curr_diff = df["macd"].iloc[i]   - df["signal"].iloc[i]
-        price     = df["Close"].iloc[i]
-        date      = df.index[i]
+        dif_prev = df["macd"].iloc[i-1] - df["senyal"].iloc[i-1]
+        dif_act  = df["macd"].iloc[i]   - df["senyal"].iloc[i]
+        preu     = float(df["Close"].iloc[i])
+        data     = df.index[i]
 
-        # Bullish crossover → BUY
-        if prev_diff < 0 and curr_diff >= 0 and position == 0:
-            shares      = int(cash // price)
-            if shares > 0:
-                position    = shares
-                cash       -= shares * price
-                entry_price = price
-                entry_date  = date
+        # COMPRA — creuament alcista
+        if dif_prev < 0 and dif_act >= 0 and posicio == 0:
+            pressupost = min(import_op, efectiu) if import_op > 0 else efectiu
+            accions    = int(pressupost // preu)
+            if accions > 0:
+                posicio      = accions
+                efectiu     -= accions * preu
+                preu_entrada = preu
+                data_entrada = data
 
-        # Bearish crossover → SELL
-        elif prev_diff > 0 and curr_diff <= 0 and position > 0:
-            cash += position * price
-            pnl   = (price - entry_price) * position
-            pct   = (price - entry_price) / entry_price * 100
-            trades.append({
-                "Entrada": entry_date.strftime("%Y-%m-%d"),
-                "Salida":  date.strftime("%Y-%m-%d"),
-                "Precio entrada": round(entry_price, 2),
-                "Precio salida":  round(price, 2),
-                "Shares": position,
-                "P&L ($)": round(pnl, 2),
-                "Retorno (%)": round(pct, 2),
+        # VENDA — creuament baixista
+        elif dif_prev > 0 and dif_act <= 0 and posicio > 0:
+            efectiu += posicio * preu
+            ganancia = (preu - preu_entrada) * posicio
+            pct      = (preu - preu_entrada) / preu_entrada * 100
+            dies     = (data - data_entrada).days
+            operacions.append({
+                "Entrada":        data_entrada.strftime("%Y-%m-%d"),
+                "Sortida":        data.strftime("%Y-%m-%d"),
+                "Dies":           dies,
+                "Preu entrada":   round(preu_entrada, 2),
+                "Preu sortida":   round(preu, 2),
+                "Accions":        posicio,
+                "Import inv.($)": round(preu_entrada * posicio, 2),
+                "G/P ($)":        round(ganancia, 2),
+                "Retorn (%)":     round(pct, 2),
             })
-            position = 0
+            posicio = 0
 
-        equity.append(cash + position * price)
+        equitat.append(efectiu + posicio * preu)
 
     df_eq = df.iloc[1:].copy()
-    df_eq["equity"] = equity
-    return df_eq, pd.DataFrame(trades), df
+    df_eq["equitat"] = equitat
+    return df_eq, pd.DataFrame(operacions), df
 
 
-# ── Stats ─────────────────────────────────────────────────────────────────────
-def compute_stats(df_eq, trades_df, capital):
-    final_equity = df_eq["equity"].iloc[-1]
-    total_return = (final_equity - capital) / capital * 100
+# ── Estadístiques ─────────────────────────────────────────────────────────────
+def calcular_stats(df_eq, ops_df, capital):
+    equitat_final = df_eq["equitat"].iloc[-1]
+    retorn_total  = (equitat_final - capital) / capital * 100
+    retorn_bh     = (df_eq["Close"].iloc[-1] - df_eq["Close"].iloc[0]) / df_eq["Close"].iloc[0] * 100
 
-    # Buy & hold
-    bh_return = (df_eq["Close"].iloc[-1] - df_eq["Close"].iloc[0]) / df_eq["Close"].iloc[0] * 100
+    max_acum = df_eq["equitat"].cummax()
+    drawdown = (df_eq["equitat"] - max_acum) / max_acum * 100
+    max_dd   = drawdown.min()
 
-    # Max drawdown
-    roll_max   = df_eq["equity"].cummax()
-    drawdown   = (df_eq["equity"] - roll_max) / roll_max * 100
-    max_dd     = drawdown.min()
+    saldo_max      = df_eq["equitat"].max()
+    saldo_min      = df_eq["equitat"].min()
+    data_saldo_max = df_eq["equitat"].idxmax().strftime("%Y-%m-%d")
+    data_saldo_min = df_eq["equitat"].idxmin().strftime("%Y-%m-%d")
 
-    # Win rate
-    win_rate = 0.0
-    avg_win = avg_loss = 0.0
-    if not trades_df.empty:
-        wins     = trades_df[trades_df["P&L ($)"] > 0]
-        losses   = trades_df[trades_df["P&L ($)"] <= 0]
-        win_rate = len(wins) / len(trades_df) * 100
-        avg_win  = wins["P&L ($)"].mean() if not wins.empty else 0
-        avg_loss = losses["P&L ($)"].mean() if not losses.empty else 0
+    ret_diaris = df_eq["equitat"].pct_change().dropna()
+    sharpe = (ret_diaris.mean() / ret_diaris.std() * np.sqrt(252)
+              if ret_diaris.std() > 0 else 0.0)
+
+    taxa_enc = ganancia_m = perdua_m = millor = pitjor = dies_m = 0.0
+    ratxa_g = ratxa_p = 0
+
+    if not ops_df.empty:
+        guanys  = ops_df[ops_df["G/P ($)"] > 0]
+        perdues = ops_df[ops_df["G/P ($)"] <= 0]
+        taxa_enc  = len(guanys) / len(ops_df) * 100
+        ganancia_m = guanys["G/P ($)"].mean()   if not guanys.empty  else 0
+        perdua_m   = perdues["G/P ($)"].mean()  if not perdues.empty else 0
+        millor     = ops_df["G/P ($)"].max()
+        pitjor     = ops_df["G/P ($)"].min()
+        dies_m     = ops_df["Dies"].mean()
+
+        cur = 0
+        for gp in ops_df["G/P ($)"]:
+            cur = (cur + 1 if cur >= 0 else 1) if gp > 0 else (cur - 1 if cur <= 0 else -1)
+            if cur > 0: ratxa_g = max(ratxa_g, cur)
+            else:       ratxa_p = max(ratxa_p, abs(cur))
 
     return {
-        "Capital final":    round(final_equity, 2),
-        "Retorno total":    round(total_return, 2),
-        "Buy & Hold":       round(bh_return, 2),
+        "Equitat final":    round(equitat_final, 2),
+        "Retorn total":     round(retorn_total, 2),
+        "Buy & Hold":       round(retorn_bh, 2),
         "Max Drawdown":     round(max_dd, 2),
-        "Nº operaciones":   len(trades_df),
-        "Win rate":         round(win_rate, 2),
-        "Avg ganancia":     round(avg_win, 2),
-        "Avg pérdida":      round(avg_loss, 2),
+        "Sharpe":           round(sharpe, 2),
+        "Num ops":          len(ops_df),
+        "Taxa encert":      round(taxa_enc, 2),
+        "Ganancia mitjana": round(ganancia_m, 2),
+        "Perdua mitjana":   round(perdua_m, 2),
+        "Millor op":        round(millor, 2),
+        "Pitjor op":        round(pitjor, 2),
+        "Saldo max":        round(saldo_max, 2),
+        "Data saldo max":   data_saldo_max,
+        "Saldo min":        round(saldo_min, 2),
+        "Data saldo min":   data_saldo_min,
+        "Ratxa guanys":     ratxa_g,
+        "Ratxa perdues":    ratxa_p,
+        "Dies mitjana":     round(dies_m, 1),
     }
 
 
-# ── Charts ────────────────────────────────────────────────────────────────────
-def build_chart(df_eq, trades_df):
+# ── Gràfic ────────────────────────────────────────────────────────────────────
+def construir_grafic(df_eq, ops_df, stats):
     fig = make_subplots(
         rows=3, cols=1,
         shared_xaxes=True,
         row_heights=[0.5, 0.25, 0.25],
         vertical_spacing=0.03,
-        subplot_titles=("Precio + Señales", "MACD", "Equity Curve"),
+        subplot_titles=("Preu + Senyals", "MACD", "Corba d'equitat"),
     )
 
-    # Candlestick
+    # Espelmes
     fig.add_trace(go.Candlestick(
         x=df_eq.index,
         open=df_eq["Open"], high=df_eq["High"],
         low=df_eq["Low"],   close=df_eq["Close"],
-        name="Precio",
+        name="Preu",
         increasing_line_color="#3fb950",
         decreasing_line_color="#f85149",
     ), row=1, col=1)
 
-    # Trade markers
-    if not trades_df.empty:
+    # Marcadors d'operacions
+    if not ops_df.empty:
         fig.add_trace(go.Scatter(
-            x=pd.to_datetime(trades_df["Entrada"]),
-            y=trades_df["Precio entrada"],
+            x=pd.to_datetime(ops_df["Entrada"]),
+            y=ops_df["Preu entrada"],
             mode="markers",
             marker=dict(symbol="triangle-up", size=12, color="#58a6ff"),
             name="Compra",
         ), row=1, col=1)
         fig.add_trace(go.Scatter(
-            x=pd.to_datetime(trades_df["Salida"]),
-            y=trades_df["Precio salida"],
+            x=pd.to_datetime(ops_df["Sortida"]),
+            y=ops_df["Preu sortida"],
             mode="markers",
             marker=dict(symbol="triangle-down", size=12, color="#f0883e"),
-            name="Venta",
+            name="Venda",
         ), row=1, col=1)
 
-    # MACD
-    colors = ["#3fb950" if v >= 0 else "#f85149" for v in df_eq["hist"]]
-    fig.add_trace(go.Bar(x=df_eq.index, y=df_eq["hist"], name="Histograma",
-                         marker_color=colors, opacity=0.7), row=2, col=1)
+    # Panel MACD
+    colors_bar = ["#3fb950" if v >= 0 else "#f85149" for v in df_eq["hist"]]
+    fig.add_trace(go.Bar(x=df_eq.index, y=df_eq["hist"],
+                         marker_color=colors_bar, opacity=0.7, name="Histograma"), row=2, col=1)
     fig.add_trace(go.Scatter(x=df_eq.index, y=df_eq["macd"],
                              line=dict(color="#58a6ff", width=1.5), name="MACD"), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df_eq.index, y=df_eq["signal"],
-                             line=dict(color="#f0883e", width=1.5), name="Signal"), row=2, col=1)
+    fig.add_trace(go.Scatter(x=df_eq.index, y=df_eq["senyal"],
+                             line=dict(color="#f0883e", width=1.5), name="Senyal"), row=2, col=1)
 
-    # Equity
+    # Corba d'equitat
     fig.add_trace(go.Scatter(
-        x=df_eq.index, y=df_eq["equity"],
+        x=df_eq.index, y=df_eq["equitat"],
         fill="tozeroy",
         line=dict(color="#58a6ff", width=2),
         fillcolor="rgba(88,166,255,0.08)",
-        name="Equity",
+        name="Equitat",
+    ), row=3, col=1)
+
+    # Marques saldo màx / mín
+    fig.add_trace(go.Scatter(
+        x=[pd.to_datetime(stats["Data saldo max"])],
+        y=[stats["Saldo max"]],
+        mode="markers+text",
+        marker=dict(symbol="star", size=14, color="#3fb950"),
+        text=["MÀX"], textposition="top center",
+        textfont=dict(color="#3fb950", size=10),
+        name="Saldo màxim",
+    ), row=3, col=1)
+    fig.add_trace(go.Scatter(
+        x=[pd.to_datetime(stats["Data saldo min"])],
+        y=[stats["Saldo min"]],
+        mode="markers+text",
+        marker=dict(symbol="x", size=12, color="#f85149"),
+        text=["MÍN"], textposition="bottom center",
+        textfont=dict(color="#f85149", size=10),
+        name="Saldo mínim",
     ), row=3, col=1)
 
     fig.update_layout(
-        paper_bgcolor="#0d1117",
-        plot_bgcolor="#0d1117",
+        paper_bgcolor="#0d1117", plot_bgcolor="#0d1117",
         font=dict(color="#8b949e", family="DM Sans"),
         xaxis_rangeslider_visible=False,
-        legend=dict(bgcolor="#161b22", bordercolor="#30363d", borderwidth=1),
-        height=750,
-        margin=dict(l=10, r=10, t=40, b=10),
+        legend=dict(bgcolor="#161b22", bordercolor="#30363d", borderwidth=1,
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=700,
+        margin=dict(l=4, r=4, t=40, b=4),
     )
     for i in range(1, 4):
         fig.update_xaxes(gridcolor="#21262d", row=i, col=1)
         fig.update_yaxes(gridcolor="#21262d", row=i, col=1)
-
     return fig
 
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+# ── Helper targeta ────────────────────────────────────────────────────────────
+def targeta(col, etiqueta, valor, cls, sub=None):
+    sub_html = f'<div class="metric-sub">{sub}</div>' if sub else ""
+    col.markdown(f"""
+    <div class="metric-card">
+      <div class="metric-label">{etiqueta}</div>
+      <div class="metric-value {cls}">{valor}</div>
+      {sub_html}
+    </div>""", unsafe_allow_html=True)
+
+
+# ── Barra lateral ─────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown('<div class="header-tag">CONFIGURACIÓN</div>', unsafe_allow_html=True)
-    st.markdown("## ⚙️ Parámetros")
+    st.markdown('<div class="etiqueta-cap">CONFIGURACIÓ</div>', unsafe_allow_html=True)
+    st.markdown("## ⚙️ Paràmetres")
 
-    ticker  = st.text_input("Ticker", value="AAPL").upper().strip()
-    capital = st.number_input("Capital inicial ($)", value=10_000, step=500, min_value=100)
+    ticker = st.text_input("Ticker", value="AAPL").upper().strip()
+
+    st.markdown("**Capital i mida de l'operació**")
+    capital     = st.number_input("Capital inicial ($)", value=10_000, step=500, min_value=100)
+    import_op   = st.number_input(
+        "Import per operació ($)",
+        value=0, step=500, min_value=0,
+        help="Import fix a invertir en cada senyal de compra. 0 = tot l'efectiu disponible."
+    )
+    if import_op == 0:
+        st.caption("🔄 Fent servir tot el capital disponible per operació")
+    else:
+        st.caption(f"🎯 Màxim **${import_op:,}** per operació")
 
     st.markdown("---")
-    st.markdown("**Período histórico**")
-    end_date   = datetime.today()
-    start_date = st.date_input("Desde", value=end_date - timedelta(days=3*365))
-    end_date   = st.date_input("Hasta", value=end_date)
+    st.markdown("**Període històric**")
+    fi_dt       = datetime.today()
+    data_inici  = st.date_input("Des de", value=fi_dt - timedelta(days=3*365))
+    data_fi     = st.date_input("Fins a", value=fi_dt)
 
     st.markdown("---")
-    st.markdown("**Parámetros MACD**")
-    fast   = st.slider("EMA rápida",   5,  50, 12)
-    slow   = st.slider("EMA lenta",   10, 100, 26)
-    signal = st.slider("Señal",        3,  20,  9)
+    st.markdown("**Paràmetres MACD**")
+    rapid_p  = st.slider("EMA ràpida",   5,  50, 12)
+    lent_p   = st.slider("EMA lenta",   10, 100, 26)
+    senyal_p = st.slider("Senyal",       3,  20,  9)
 
-    run_btn = st.button("▶ Ejecutar backtest", use_container_width=True)
+    executar_btn = st.button("▶ Executar backtest", use_container_width=True)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-st.markdown('<div class="header-tag">BACKTESTER</div>', unsafe_allow_html=True)
-st.markdown("# 📈 MACD Strategy Backtester")
-st.markdown("Estrategia de cruce de MACD sobre datos históricos reales · Coste 0 · `yfinance` + `Streamlit`")
+# ── Pàgina principal ──────────────────────────────────────────────────────────
+st.markdown('<div class="etiqueta-cap">BACKTESTER</div>', unsafe_allow_html=True)
+st.markdown("# 📈 Backtester Estratègia MACD")
+st.markdown("Creuament MACD sobre dades històriques reals · Cost 0 · `yfinance` + `Streamlit`")
 st.markdown("---")
 
-if run_btn:
-    with st.spinner(f"Descargando datos de {ticker}..."):
-        raw = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
+if executar_btn:
+    with st.spinner(f"Descarregant dades de {ticker}..."):
+        raw = yf.download(ticker, start=data_inici, end=data_fi, auto_adjust=True, progress=False)
 
     if raw.empty:
-        st.error(f"No se encontraron datos para **{ticker}**. Revisa el ticker.")
+        st.error(f"No s'han trobat dades per a **{ticker}**. Comprova el ticker.")
     else:
-        # Flatten multi-index columns if present
         if isinstance(raw.columns, pd.MultiIndex):
             raw.columns = raw.columns.get_level_values(0)
 
-        df_eq, trades_df, df_full = run_backtest(raw, capital)
-        stats = compute_stats(df_eq, trades_df, capital)
+        df_eq, ops_df, df_complet = executar_backtest(
+            raw, capital, import_op, rapid_p, lent_p, senyal_p
+        )
+        s = calcular_stats(df_eq, ops_df, capital)
 
-        # ── KPI row ──
-        cols = st.columns(4)
-        kpis = [
-            ("Capital final",  f"${stats['Capital final']:,.0f}",
-             "positive" if stats["Retorno total"] >= 0 else "negative"),
-            ("Retorno estrategia", f"{stats['Retorno total']:+.1f}%",
-             "positive" if stats["Retorno total"] >= 0 else "negative"),
-            ("Buy & Hold",     f"{stats['Buy & Hold']:+.1f}%",
-             "positive" if stats["Buy & Hold"] >= 0 else "negative"),
-            ("Max Drawdown",   f"{stats['Max Drawdown']:.1f}%", "negative"),
-        ]
-        for col, (label, value, cls) in zip(cols, kpis):
-            col.markdown(f"""
-            <div class="metric-card">
-              <div class="metric-label">{label}</div>
-              <div class="metric-value {cls}">{value}</div>
-            </div>""", unsafe_allow_html=True)
+        # ── Secció 1: Rendiment general ──────────────────────────────────────
+        st.markdown('<div class="titol-seccio">📊 Rendiment general</div>', unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        targeta(c1, "Capital final",      f"${s['Equitat final']:,.0f}",
+                "positiu" if s["Retorn total"] >= 0 else "negatiu")
+        targeta(c2, "Retorn estratègia",  f"{s['Retorn total']:+.1f}%",
+                "positiu" if s["Retorn total"] >= 0 else "negatiu")
+        targeta(c3, "Buy & Hold",         f"{s['Buy & Hold']:+.1f}%",
+                "positiu" if s["Buy & Hold"] >= 0 else "negatiu")
 
-        st.markdown("")
+        c4, c5 = st.columns(2)
+        targeta(c4, "Màx. Drawdown",  f"{s['Max Drawdown']:.1f}%", "negatiu")
+        targeta(c5, "Ràtio de Sharpe", f"{s['Sharpe']:.2f}",
+                "positiu" if s["Sharpe"] >= 1 else "avís" if s["Sharpe"] >= 0 else "negatiu")
 
-        cols2 = st.columns(4)
-        kpis2 = [
-            ("Operaciones",   str(stats["Nº operaciones"]),   "neutral"),
-            ("Win Rate",      f"{stats['Win rate']:.1f}%",
-             "positive" if stats["Win rate"] >= 50 else "negative"),
-            ("Avg ganancia",  f"${stats['Avg ganancia']:,.0f}", "positive"),
-            ("Avg pérdida",   f"${stats['Avg pérdida']:,.0f}", "negative"),
-        ]
-        for col, (label, value, cls) in zip(cols2, kpis2):
-            col.markdown(f"""
-            <div class="metric-card">
-              <div class="metric-label">{label}</div>
-              <div class="metric-value {cls}">{value}</div>
-            </div>""", unsafe_allow_html=True)
+        # ── Secció 2: Saldo del compte ───────────────────────────────────────
+        st.markdown('<div class="titol-seccio">💰 Saldo del compte</div>', unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        targeta(c1, "Saldo màxim assolit",
+                f"${s['Saldo max']:,.0f}", "positiu",
+                sub=f"📅 {s['Data saldo max']}")
+        targeta(c2, "Saldo mínim registrat",
+                f"${s['Saldo min']:,.0f}", "negatiu",
+                sub=f"📅 {s['Data saldo min']}")
+
+        c3, = st.columns(1)
+        targeta(c3, "Capital inicial",
+                f"${capital:,.0f}", "neutral",
+                sub=f"Import/op: {'Tot l\'efectiu' if import_op == 0 else f'${import_op:,}'}")
+
+        # ── Secció 3: Estadístiques d'operacions ─────────────────────────────
+        st.markdown('<div class="titol-seccio">🎯 Estadístiques d\'operacions</div>', unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        targeta(c1, "Nº operacions",    str(s["Num ops"]),             "neutral")
+        targeta(c2, "Taxa d'encert",    f"{s['Taxa encert']:.1f}%",
+                "positiu" if s["Taxa encert"] >= 50 else "negatiu")
+        targeta(c3, "Dies mitjana/op.", f"{s['Dies mitjana']} dies",    "neutral")
+
+        c4, c5, c6 = st.columns(3)
+        targeta(c4, "Guany mitjà",      f"${s['Ganancia mitjana']:,.0f}", "positiu")
+        targeta(c5, "Millor operació",  f"${s['Millor op']:,.0f}",        "positiu")
+        targeta(c6, "Pèrdua mitjana",   f"${s['Perdua mitjana']:,.0f}",   "negatiu")
+
+        c7, c8, c9 = st.columns(3)
+        targeta(c7, "Pitjor operació",      f"${s['Pitjor op']:,.0f}",         "negatiu")
+        targeta(c8, "Ratxa guanyadora màx", f"{s['Ratxa guanys']} ops",         "positiu")
+        targeta(c9, "Ratxa perdedora màx",  f"{s['Ratxa perdues']} ops",        "negatiu")
 
         st.markdown("---")
 
-        # ── Chart ──
-        st.plotly_chart(build_chart(df_eq, trades_df), use_container_width=True)
+        # ── Gràfic ───────────────────────────────────────────────────────────
+        st.plotly_chart(construir_grafic(df_eq, ops_df, s), use_container_width=True)
 
-        # ── Trade log ──
-        if not trades_df.empty:
-            st.markdown("### 📋 Registro de operaciones")
-            def color_pnl(v):
-                if isinstance(v, (int, float)) and v > 0:
-                    return "color: #3fb950"
-                elif isinstance(v, (int, float)) and v < 0:
-                    return "color: #f85149"
+        # ── Registre d'operacions ────────────────────────────────────────────
+        if not ops_df.empty:
+            st.markdown('<div class="titol-seccio">📋 Registre d\'operacions</div>', unsafe_allow_html=True)
+
+            def color_gp(v):
+                if isinstance(v, (int, float)) and v > 0: return "color: #3fb950"
+                if isinstance(v, (int, float)) and v < 0: return "color: #f85149"
                 return ""
 
             try:
-                styled = trades_df.style.map(color_pnl, subset=["P&L ($)", "Retorno (%)"])
+                styled = ops_df.style.map(color_gp, subset=["G/P ($)", "Retorn (%)"])
             except AttributeError:
-                styled = trades_df.style.applymap(color_pnl, subset=["P&L ($)", "Retorno (%)"])
+                styled = ops_df.style.applymap(color_gp, subset=["G/P ($)", "Retorn (%)"])
 
             st.dataframe(styled, use_container_width=True, hide_index=True)
         else:
-            st.info("No se generaron operaciones en este período. Prueba a ampliar el rango de fechas.")
+            st.info("No s'han generat operacions. Prova a ampliar el rang de dates.")
 
 else:
     st.markdown("""
-    <div style="text-align:center; padding: 4rem 2rem; color: #8b949e;">
-      <div style="font-size: 4rem;">📊</div>
-      <div style="font-family: 'Space Mono', monospace; font-size: 1.2rem; margin-top: 1rem;">
-        Configura los parámetros en el panel izquierdo<br>y pulsa <strong style="color:#58a6ff">▶ Ejecutar backtest</strong>
+    <div style="text-align:center; padding: 3rem 1.5rem; color: #8b949e;">
+      <div style="font-size: 3.5rem;">📊</div>
+      <div style="font-family: 'Space Mono', monospace; font-size: 1rem; margin-top: 1rem; line-height: 1.6;">
+        Configura els paràmetres al panell<br>
+        i prem <strong style="color:#58a6ff">▶ Executar backtest</strong>
       </div>
-      <div style="margin-top: 1rem; font-size: 0.85rem;">
-        Prueba con tickers como <code>AAPL</code>, <code>TSLA</code>, <code>MSFT</code>, <code>NVDA</code>, <code>BTC-USD</code>
+      <div style="margin-top: 1.2rem; font-size: 0.82rem; line-height: 2.4;">
+        Prova amb: <code>AAPL</code> · <code>TSLA</code> · <code>NVDA</code><br>
+        <code>BTC-USD</code> · <code>SPY</code> · <code>ITX.MC</code>
       </div>
     </div>
     """, unsafe_allow_html=True)
