@@ -334,15 +334,19 @@ if run_btn:
         # ── Trade log ──
         if not trades_df.empty:
             st.markdown("### 📋 Registro de operaciones")
-            st.dataframe(
-                trades_df.style.applymap(
-                    lambda v: "color: #3fb950" if isinstance(v, (int, float)) and v > 0
-                    else ("color: #f85149" if isinstance(v, (int, float)) and v < 0 else ""),
-                    subset=["P&L ($)", "Retorno (%)"]
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
+            def color_pnl(v):
+                if isinstance(v, (int, float)) and v > 0:
+                    return "color: #3fb950"
+                elif isinstance(v, (int, float)) and v < 0:
+                    return "color: #f85149"
+                return ""
+
+            try:
+                styled = trades_df.style.map(color_pnl, subset=["P&L ($)", "Retorno (%)"])
+            except AttributeError:
+                styled = trades_df.style.applymap(color_pnl, subset=["P&L ($)", "Retorno (%)"])
+
+            st.dataframe(styled, use_container_width=True, hide_index=True)
         else:
             st.info("No se generaron operaciones en este período. Prueba a ampliar el rango de fechas.")
 
